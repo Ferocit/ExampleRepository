@@ -4,7 +4,7 @@ import av
 import pytest
 from PIL import ImageChops, ImageStat
 
-from easy_cutter.video import VideoReader, export_clip, ffmpeg_exe
+from easy_cutter.video import VideoReader, export_clip, ffmpeg_exe, frame_times
 
 FPS = 25
 
@@ -27,7 +27,7 @@ def diff(a, b):
     return sum(ImageStat.Stat(ImageChops.difference(a.convert('RGB'), b.convert('RGB'))).mean) / 3
 
 
-def frame_times(path):
+def decoded_times(path):
     with av.open(path) as c:
         return [float(f.time) for f in c.decode(video=0)]
 
@@ -53,7 +53,7 @@ def test_preview_frames(video, start):
 def test_export_matches_preview(video, tmp_path, start):
     out = str(tmp_path / 'clip.mp4')
     first, last = export_clip(video, out, start, start + 5)
-    times = frame_times(out)
+    times = decoded_times(out)
     assert len(times) == round((last - first) * FPS) + 1
     with av.open(out) as c:
         assert len(c.streams.audio) == 1
@@ -76,3 +76,26 @@ def test_end_of_video(video):
     reader.close()
     assert first == pytest.approx(15)
     assert last == pytest.approx(20 - 1 / FPS)
+
+
+def test_frame_times_mp4(video):
+    times = frame_times(video)
+    assert len(times) == 20 * FPS
+    assert times == pytest.approx([i / FPS for i in range(20 * FPS)], abs=1e-6)
+
+
+def test_frame_times_match_decoder_webm(tmp_path):
+    # WebM speichert Zeitstempel in Millisekunden, bei 29,97 fps liegen sie also neben dem idealen Raster
+    path = str(tmp_path / 'test.webm')
+    subprocess.run([
+        ffmpeg_exe(), '-y', '-loglevel', 'error',
+        '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=30000/1001:duration=3',
+        '-c:v', 'libvpx-vp9', '-deadline', 'realtime', path,
+    ], check=True)
+    times = frame_times(path)
+    assert times == pytest.approx(decoded_times(path), abs=1e-9)
+    reader = VideoReader(path)
+    # Jeder Index-Zeitstempel muss als Start genau seinen eigenen Frame liefern
+    for t in times[40:50]:
+        assert reader.time_of(reader.first_frame_at(t)) == pytest.approx(t, abs=1e-9)
+    reader.close()

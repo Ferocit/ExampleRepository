@@ -103,6 +103,17 @@ class VideoReader:
         return self.time_of(first), self.time_of(last)
 
 
+def frame_times(path):
+    """Sortierte Zeiten aller Videoframes. Liest nur die Pakete, ohne zu dekodieren."""
+    with av.open(path) as container:
+        stream = container.streams.video[0]
+        tb = stream.time_base
+        offset = stream.start_time if stream.start_time is not None else 0
+        times = [float((p.pts - offset) * tb) for p in container.demux(stream) if p.pts is not None and p.size]
+    # Vom Decoder verworfene Frames vor dem Videoanfang (Edit-Lists) weglassen
+    return sorted(t for t in times if t >= -EPS)
+
+
 def ffmpeg_exe():
     path = shutil.which('ffmpeg')
     if path:

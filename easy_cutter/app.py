@@ -1,3 +1,4 @@
+import bisect
 import os
 import queue
 import sys
@@ -8,10 +9,11 @@ from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from .video import EPS, VideoReader, export_clip
+from .video import EPS, VideoReader, export_clip, frame_times
 
 DEFAULT_LENGTH = 5.0
-MIN_LENGTH = 0.1
+# Kleiner als ein Frame, damit sich der Bereich per Frame-Buttons bis auf einen Frame verkürzen lässt
+MIN_LENGTH = 0.01
 # Vorschaubilder werden höchstens in dieser Größe dekodiert und dann auf die Fenstergröße skaliert
 PREVIEW_SIZE = (1280, 720)
 POLL_MS = 20
@@ -113,6 +115,7 @@ class Timeline(tk.Canvas):
                          takefocus=1, cursor='hand2')
         self.on_move = on_move
         self.duration = 0.0
+        self.frame_times = None
         self.start = 0.0
         self.length = 0.0
         self.playhead = 0.0
@@ -168,6 +171,7 @@ class EasyCutter:
         self.results = queue.Queue()
         self.path = None
         self.duration = 0.0
+        self.frame_times = None
         self.start = 0.0
         self.length = DEFAULT_LENGTH
         self.position = 0.0
@@ -246,11 +250,13 @@ class EasyCutter:
 
         start_panel, self.start_caption = self._panel(body, 'Erster Frame')
         start_panel.grid(row=0, column=1, sticky='nsew', pady=(0, 6))
+        self.step_buttons = self._step_buttons(start_panel, self.step_start)
         self.start_view = VideoView(start_panel)
         self.start_view.pack(fill='both', expand=True)
 
         end_panel, self.end_caption = self._panel(body, 'Letzter Frame')
         end_panel.grid(row=1, column=1, sticky='nsew', pady=(6, 0))
+        self.step_buttons += self._step_buttons(end_panel, self.step_end)
         self.end_view = VideoView(end_panel)
         self.end_view.pack(fill='both', expand=True)
 
@@ -289,6 +295,16 @@ class EasyCutter:
         caption.pack(anchor='w', pady=(0, 6))
         return frame, caption
 
+    def _step_buttons(self, master, on_step):
+        # Vor dem Bild packen, damit die Buttons bei wenig Platz nicht weggedrückt werden
+        row = ttk.Frame(master, style='Panel.TFrame')
+        row.pack(side='bottom', fill='x', pady=(8, 0))
+        back = ttk.Button(row, text='◀ −1 Frame', command=lambda: on_step(-1))
+        back.pack(side='left')
+        forward = ttk.Button(row, text='+1 Frame ▶', command=lambda: on_step(1))
+        forward.pack(side='left', padx=(8, 0))
+        return [back, forward]
+
     def _spinbox(self, master, label, var, on_change):
         box = ttk.Frame(master)
         box.pack(side='left', padx=(0, 12))
@@ -306,6 +322,8 @@ class EasyCutter:
                   self.from_pos_button, self.range_button):
             w.state([state])
         self.export_button.state(['!disabled' if enabled and not self.exporting else 'disabled'])
+        for w in self.step_buttons:
+            w.state(['!disabled' if enabled and self.frame_times else 'disabled'])
 
     def set_status(self, text):
         self.status.configure(text=text)
@@ -331,6 +349,8 @@ class EasyCutter:
             return
         self.path = path
         self.duration = duration
+        self.frame_times = None
+        threading.Thread(target=self._index_worker, args=(path,), daemon=True).start()
         self.file_label.configure(text=os.path.basename(path))
         self.total_label.configure(text=format_time(duration))
         self.timeline.duration = duration
@@ -362,16 +382,48 @@ class EasyCutter:
         self.workers['end'].request(self.path, self.start + self.length)
 
     def _on_start_entry(self):
+        # Unveränderten Text nicht neu übernehmen: Die Rundung auf 3 Stellen könnte sonst einen Frame verschieben
+        if self.start_var.get() == f'{self.start:.3f}':
+            return
         try:
             self.set_range(float(self.start_var.get().replace(',', '.')))
         except ValueError:
             self.set_range(self.start)
 
     def _on_length_entry(self):
+        if self.length_var.get() == f'{self.length:.3f}':
+            return
         try:
             self.set_range(self.start, float(self.length_var.get().replace(',', '.')))
         except ValueError:
             self.set_range(self.start)
+
+    def _frame_indices(self):
+        """Index des ersten und des letzten Frames im aktuellen Bereich."""
+        ft = self.frame_times
+        first = bisect.bisect_left(ft, self.start - EPS)
+        last = bisect.bisect_left(ft, self.start + self.length - EPS) - 1
+        return min(first, len(ft) - 1), max(last, 0)
+
+    def step_start(self, step):
+        """Verschiebt den Anfang um `step` Frames. Das Ende bleibt stehen."""
+        if not self.frame_times:
+            return
+        first, last = self._frame_indices()
+        first = min(max(first + step, 0), last)
+        end = self.start + self.length
+        self.set_range(self.frame_times[first], end - self.frame_times[first])
+
+    def step_end(self, step):
+        """Verschiebt das Ende um `step` Frames. Der Anfang bleibt stehen."""
+        if not self.frame_times:
+            return
+        ft = self.frame_times
+        first, last = self._frame_indices()
+        last = min(max(last + step, first), len(ft) - 1)
+        # Das Ende liegt auf dem Folgeframe, der damit gerade nicht mehr zum Bereich gehört
+        end = ft[last + 1] if last + 1 < len(ft) else max(self.duration, ft[last] + EPS * 10)
+        self.set_range(self.start, end - self.start)
 
     # Hauptfenster: Position und Wiedergabe
 
@@ -471,6 +523,12 @@ class EasyCutter:
         args = (self.path, output, self.start, end)
         threading.Thread(target=self._export_worker, args=args, daemon=True).start()
 
+    def _index_worker(self, path):
+        try:
+            self.results.put(('frame_times', path, frame_times(path)))
+        except Exception as e:  # noqa: BLE001
+            self.results.put(('error', 'index', path, e))
+
     def _export_worker(self, path, output, start, end):
         try:
             first, last = export_clip(path, output, start, end,
@@ -513,6 +571,11 @@ class EasyCutter:
             _, name, path, err = msg
             if path == self.path:
                 self.set_status(f'Fehler beim Dekodieren: {err}')
+        elif kind == 'frame_times':
+            _, path, times = msg
+            if path == self.path and times:
+                self.frame_times = times
+                self._set_enabled(True)
         elif kind == 'progress':
             self.progress['value'] = msg[1]
         elif kind == 'export_done':

@@ -25,6 +25,7 @@ python -m easy_cutter video.mp4
 - Links das ganze Video mit Abspielen/Pause und Positionsregler, rechts erster und letzter Frame des Bereichs.
 - Bereich (Default 5 s) auf dem Zeitstrahl ziehen oder neben die Auswahl klicken. Mit Fokus auf dem Zeitstrahl verschieben die Pfeiltasten um 0,1 s, mit Shift um 1 s.
 - Start und Länge lassen sich auch als Zahl eingeben.
+- **−1 Frame / +1 Frame** unter den Vorschaubildern verschieben Anfang bzw. Ende um genau einen Frame. Die jeweils andere Grenze bleibt stehen. Die Buttons werden aktiv, sobald der Frame-Index erstellt ist (beim Laden im Hintergrund).
 - **Start = aktuelle Position** übernimmt die Position des Players als Bereichsanfang.
 - **Bereich abspielen** spielt nur den gewählten Bereich.
 - **Clip speichern** exportiert als MP4 (H.264/AAC).
@@ -34,6 +35,7 @@ Der Bereich umfasst alle Frames ab `Start` bis vor `Start + Länge`. Bei 25 fps 
 ## Technik und Grenzen
 
 - Frames werden mit [PyAV](https://pyav.basswood-io.com/) dekodiert, exportiert wird mit ffmpeg. Liegt kein `ffmpeg` im PATH, wird das von `imageio-ffmpeg` mitgelieferte genutzt.
+- Für die Frame-Buttons werden beim Laden die echten Zeitstempel aller Frames aus dem Container gelesen (ohne Dekodieren). Dadurch stimmen die Schritte auch bei variabler Framerate. Bei sehr großen Dateien kann das einige Sekunden dauern.
 - Beim Export wird neu kodiert, damit der Schnitt nicht auf Keyframes springt. Das ist langsamer als ein Schnitt ohne Neukodierung.
 - Die Wiedergabe im Hauptfenster ist ohne Ton und dient nur der Orientierung. Der exportierte Clip enthält den Ton.
 - Kein Drag & Drop (Tkinter kann das nicht ohne Zusatzpaket).
