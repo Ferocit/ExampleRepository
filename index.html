@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Easy Cutter</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Easy Cutter</h1>
+      <label class="button" for="file-input">Video laden</label>
+      <input id="file-input" type="file" accept="video/*" hidden />
+      <span id="file-name" class="muted">Kein Video geladen (Datei auch per Drag &amp; Drop)</span>
+    </header>
+
+    <main id="app" class="disabled">
+      <section class="pane pane-main">
+        <h2>Video</h2>
+        <video id="main-video" controls playsinline></video>
+      </section>
+
+      <section class="pane">
+        <h2>Erster Frame <span id="start-label" class="time"></span></h2>
+        <video id="start-video" muted playsinline preload="auto"></video>
+      </section>
+
+      <section class="pane">
+        <h2>Letzter Frame <span id="end-label" class="time"></span></h2>
+        <video id="end-video" muted playsinline preload="auto"></video>
+      </section>
+
+      <section class="timeline-section">
+        <div id="track" class="track">
+          <div id="selection" class="selection" tabindex="0" title="Ziehen zum Verschieben, Pfeiltasten: ±0,1 s, Shift: ±1 s"></div>
+          <div id="playhead" class="playhead"></div>
+        </div>
+        <div class="track-labels">
+          <span>0:00.000</span>
+          <span id="total-label"></span>
+        </div>
+
+        <div class="controls">
+          <label>Start (s)
+            <input id="start-input" type="number" min="0" step="0.1" value="0" />
+          </label>
+          <label>Länge (s)
+            <input id="length-input" type="number" min="0.1" step="0.1" value="5" />
+          </label>
+          <button id="from-playhead">Start = aktuelle Position</button>
+          <button id="play-range">Bereich abspielen</button>
+          <button id="export" class="primary">Clip speichern</button>
+        </div>
+        <div id="status" class="muted"></div>
+        <progress id="progress" max="1" value="0" hidden></progress>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
